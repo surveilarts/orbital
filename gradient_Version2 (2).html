@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Enchanted Oasis: Bouncing Orbs (Expanded Room, Flying, Dynamic Orbs)</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script>
+      // Bounce-orb component with orb-to-orb collision and dynamic deformation
+      AFRAME.registerComponent('bounce-orb', {
+        schema: {
+          speed: { type: 'number', default: 1.4 }
+        },
+        init: function () {
+          this.velocity = new THREE.Vector3(
+            (Math.random() * 2 - 1) * this.data.speed,
+            (Math.random() * 2 - 1) * this.data.speed,
+            (Math.random() * 2 - 1) * this.data.speed
+          );
+          this.boundaries = {
+            xMin: -20, xMax: 20,
+            yMin: 0.5, yMax: 36.5,
+            zMin: -20, zMax: 20
+          };
+          this.epsilon = 0.05;
+          this.radius = 0.2;
+          this.baseRadius = 0.2;
+          this.deformAxis = new THREE.Vector3(
+            Math.random(), Math.random(), Math.random()
+          ).normalize();
+          this.el.setAttribute('segments-width', 24);
+          this.el.setAttribute('segments-height', 18);
+          this.lastDeform = 0;
+        },
+        tick: function (time, delta) {
+          delta = delta / 1000;
+          var pos = this.el.object3D.position;
+          pos.addScaledVector(this.velocity, delta);
+
+          // Wall collisions
+          if (pos.x < this.boundaries.xMin) {
+            pos.x = this.boundaries.xMin + this.epsilon;
+            this.velocity.x = Math.abs(this.velocity.x);
+          } else if (pos.x > this.boundaries.xMax) {
+            pos.x = this.boundaries.xMax - this.epsilon;
+            this.velocity.x = -Math.abs(this.velocity.x);
+          }
+          if (pos.y < this.boundaries.yMin) {
+            pos.y = this.boundaries.yMin + this.epsilon;
+            this.velocity.y = Math.abs(this.velocity.y);
+          } else if (pos.y > this.boundaries.yMax) {
+            pos.y = this.boundaries.yMax - this.epsilon;
+            this.velocity.y = -Math.abs(this.velocity.y);
+          }
+          if (pos.z < this.boundaries.zMin) {
+            pos.z = this.boundaries.zMin + this.epsilon;
+            this.velocity.z = Math.abs(this.velocity.z);
+          } else if (pos.z > this.boundaries.zMax) {
+            pos.z = this.boundaries.zMax - this.epsilon;
+            this.velocity.z = -Math.abs(this.velocity.z);
+          }
+
+          // Orb to orb collisions
+          if (!this.el.sceneEl) return;
+          const allOrbs = Array.from(this.el.sceneEl.querySelectorAll('[bounce-orb]'));
+          for (let otherEl of allOrbs) {
+            if (otherEl === this.el) continue;
+            const otherObj = otherEl.object3D.position;
+            const dx = pos.x - otherObj.x;
+            const dy = pos.y - otherObj.y;
+            const dz = pos.z - otherObj.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist > 0 && dist < this.radius * 2) {
+              // Elastic collision - simple velocity swap (mass and radius equal)
+              const otherComp = otherEl.components['bounce-orb'];
+              if (!otherComp) continue;
+              // Normal vector
+              const nx = dx / dist;
+              const ny = dy / dist;
+              const nz = dz / dist;
+              // Relative velocity
+              const dvx = this.velocity.x - otherComp.velocity.x;
+              const dvy = this.velocity.y - otherComp.velocity.y;
+              const dvz = this.velocity.z - otherComp.velocity.z;
+              // Dot product (velocity along normal)
+              const dot = dvx * nx + dvy * ny + dvz * nz;
+              if (dot < 0) {
+                // Only resolve if moving towards each other
+                // Impulse scalar
+                const impulse = 2 * dot / 2; // mass = 1 for both
+                // Update velocities
+                this.velocity.x -= impulse * nx;
+                this.velocity.y -= impulse * ny;
+                this.velocity.z -= impulse * nz;
+                otherComp.velocity.x += impulse * nx;
+                otherComp.velocity.y += impulse * ny;
+                otherComp.velocity.z += impulse * nz;
+                // Separate the orbs to prevent sticking
+                const overlap = this.radius * 2 - dist + 0.001;
+                pos.x += nx * (overlap / 2);
+                pos.y += ny * (overlap / 2);
+                pos.z += nz * (overlap / 2);
+                otherObj.x -= nx * (overlap / 2);
+                otherObj.y -= ny * (overlap / 2);
+                otherObj.z -= nz * (overlap / 2);
+
+                // Dynamic deformation on collision: squash along normal
+                this.deform(normal=[nx,ny,nz]);
+                otherComp.deform(normal=[-nx,-ny,-nz]);
+              }
+            }
+          }
+
+          // Dynamic deformation based on velocity (squash/stretch)
+          this.dynamicDeform();
+        },
+        // Deform the orb along a given normal vector
+        deform: function({normal}) {
+          // Animate a "squash" along the normal axis
+          const scale = 0.65 + Math.random() * 0.25; // squash factor
+          this.el.object3D.scale.set(
+            1 + normal[0] * (scale - 1),
+            1 + normal[1] * (scale - 1),
+            1 + normal[2] * (scale - 1)
+          );
+          this.lastDeform = Date.now();
+        },
+        // Stretch/squash as it moves (reset after collision)
+        dynamicDeform: function() {
+          // After a collision, let the orb return to round over time
+          if (Date.now() - this.lastDeform < 140) return;
+          const vel = this.velocity.length();
+          // More velocity = more stretched
+          let stretch = 1 + Math.min(vel / 1.6, 0.6);
+          // Deform along the orb's velocity direction for a comet effect
+          let normVel = this.velocity.clone().normalize();
+          // Keep minimum scale for roundness
+          let minScale = 0.65;
+          let scaleX = Math.max(minScale, 1 + normVel.x * (stretch - 1));
+          let scaleY = Math.max(minScale, 1 + normVel.y * (stretch - 1));
+          let scaleZ = Math.max(minScale, 1 + normVel.z * (stretch - 1));
+          this.el.object3D.scale.set(scaleX, scaleY, scaleZ);
+        }
+      });
+
+      // Spawns many orbs
+      AFRAME.registerComponent('spawn-orbs', {
+        schema: {
+          count: { type: 'int', default: 60 }
+        },
+        init: function () {
+          const sceneEl = this.el;
+          for (let i = 0; i < this.data.count; i++) {
+            let orb = document.createElement('a-sphere');
+            orb.setAttribute('radius', 0.2);
+            orb.setAttribute('color', '#'+((1<<24)*Math.random()|0).toString(16).padStart(6,'0'));
+            let posX = Math.random() * 36 - 18;
+            let posY = Math.random() * 34 + 1;
+            let posZ = Math.random() * 36 - 18;
+            orb.setAttribute('position', { x: posX, y: posY, z: posZ });
+            orb.setAttribute('bounce-orb', '');
+            sceneEl.appendChild(orb);
+          }
+        }
+      });
+
+      // Flying controls component for player
+      AFRAME.registerComponent('fly-controls', {
+        schema: {
+          speed: {type: 'number', default: 7.5}
+        },
+        init: function () {
+          this.direction = new THREE.Vector3();
+        },
+        tick: function (time, delta) {
+          var el = this.el;
+          var cam = el.getObject3D('camera');
+          if (!cam) return;
+          var move = this.direction.set(0,0,0);
+          // Keyboard input
+          // WASD for horizontal, QE for up/down
+          let speed = this.data.speed * (delta/1000);
+          if (this.isDown('KeyW')) move.z -= 1;
+          if (this.isDown('KeyS')) move.z += 1;
+          if (this.isDown('KeyA')) move.x -= 1;
+          if (this.isDown('KeyD')) move.x += 1;
+          if (this.isDown('KeyQ')) move.y -= 1;
+          if (this.isDown('KeyE')) move.y += 1;
+          if (move.lengthSq() === 0) return;
+          move.normalize().multiplyScalar(speed);
+          // Move relative to camera orientation
+          let obj = el.object3D;
+          let dir = move.clone();
+          // Only rotate X and Z, leave Y as is
+          let yAxis = new THREE.Vector3(0, 1, 0);
+          let camQuat = cam.quaternion.clone();
+          let moveWorld = dir.applyQuaternion(camQuat);
+          obj.position.add(moveWorld);
+        },
+        isDown: function (code) {
+          return !!AFRAME.utils.device.isKeyDown &&
+            AFRAME.utils.device.isKeyDown(code);
+        }
+      });
+
+      // Patch AFRAME to easily get keydown state
+      (function () {
+        let keysDown = {};
+        window.addEventListener('keydown', e => keysDown[e.code] = true);
+        window.addEventListener('keyup', e => keysDown[e.code] = false);
+        AFRAME.utils = AFRAME.utils || {};
+        AFRAME.utils.device = AFRAME.utils.device || {};
+        AFRAME.utils.device.isKeyDown = code => !!keysDown[code];
+      })();
+    </script>
+    <style>
+      body { margin: 0; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <a-scene spawn-orbs>
+      <!-- Lighting -->
+      <a-entity light="type: ambient; intensity: 0.9" color="#ffffff"></a-entity>
+      <a-entity light="type: directional; intensity: 0.8" position="0 15 15"></a-entity>
+      
+      <!-- White Floor -->
+      <a-plane position="0 0 0" rotation="-90 0 0" width="40" height="40" color="#FFFFFF"></a-plane>
+      <!-- White Ceiling (much higher) -->
+      <a-plane position="0 37 0" rotation="90 0 0" width="40" height="40" color="#FFFFFF"></a-plane>
+      <!-- White Walls (tall and wide) -->
+      <a-plane position="0 18.5 -20" rotation="0 0 0" width="40" height="37" color="#FFFFFF"></a-plane>
+      <a-plane position="0 18.5 20" rotation="0 180 0" width="40" height="37" color="#FFFFFF"></a-plane>
+      <a-plane position="-20 18.5 0" rotation="0 90 0" width="40" height="37" color="#FFFFFF"></a-plane>
+      <a-plane position="20 18.5 0" rotation="0 -90 0" width="40" height="37" color="#FFFFFF"></a-plane>
+      <!-- Camera Rig with flying controls -->
+      <a-entity id="rig" position="0 4 10">
+        <a-entity camera look-controls fly-controls wasd-controls-enabled="false"></a-entity>
+      </a-entity>
+      <!-- White Sky -->
+      <a-sky color="#FFFFFF"></a-sky>
+      <!-- Instructions -->
+      <a-entity position="0 36.5 0" text="align:center; color: #444; value:WASD = Move | QE = Up/Down | Mouse = Look"></a-entity>
+    </a-scene>
+  </body>
+</html>
