@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Enchanted Oasis: Bouncing Orbs (Collisions & White Room)</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script>
+      // Bounce-orb component with orb-to-orb collision
+      AFRAME.registerComponent('bounce-orb', {
+        schema: {
+          speed: { type: 'number', default: 1.2 }
+        },
+        init: function () {
+          this.velocity = new THREE.Vector3(
+            (Math.random() * 2 - 1) * this.data.speed,
+            (Math.random() * 2 - 1) * this.data.speed,
+            (Math.random() * 2 - 1) * this.data.speed
+          );
+          this.boundaries = {
+            xMin: -5, xMax: 5,
+            yMin: 0.5, yMax: 15.5,
+            zMin: -5, zMax: 5
+          };
+          this.epsilon = 0.05;
+          this.radius = 0.2;
+        },
+        tick: function (time, delta) {
+          delta = delta / 1000;
+          var pos = this.el.object3D.position;
+          pos.addScaledVector(this.velocity, delta);
+
+          // Wall collisions
+          if (pos.x < this.boundaries.xMin) {
+            pos.x = this.boundaries.xMin + this.epsilon;
+            this.velocity.x = Math.abs(this.velocity.x);
+          } else if (pos.x > this.boundaries.xMax) {
+            pos.x = this.boundaries.xMax - this.epsilon;
+            this.velocity.x = -Math.abs(this.velocity.x);
+          }
+          if (pos.y < this.boundaries.yMin) {
+            pos.y = this.boundaries.yMin + this.epsilon;
+            this.velocity.y = Math.abs(this.velocity.y);
+          } else if (pos.y > this.boundaries.yMax) {
+            pos.y = this.boundaries.yMax - this.epsilon;
+            this.velocity.y = -Math.abs(this.velocity.y);
+          }
+          if (pos.z < this.boundaries.zMin) {
+            pos.z = this.boundaries.zMin + this.epsilon;
+            this.velocity.z = Math.abs(this.velocity.z);
+          } else if (pos.z > this.boundaries.zMax) {
+            pos.z = this.boundaries.zMax - this.epsilon;
+            this.velocity.z = -Math.abs(this.velocity.z);
+          }
+
+          // Orb to orb collisions
+          if (!this.el.sceneEl) return;
+          const allOrbs = Array.from(this.el.sceneEl.querySelectorAll('[bounce-orb]'));
+          for (let otherEl of allOrbs) {
+            if (otherEl === this.el) continue;
+            const otherObj = otherEl.object3D.position;
+            const dx = pos.x - otherObj.x;
+            const dy = pos.y - otherObj.y;
+            const dz = pos.z - otherObj.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist > 0 && dist < this.radius * 2) {
+              // Elastic collision - simple velocity swap (mass and radius equal)
+              // Find other orb's velocity
+              const otherComp = otherEl.components['bounce-orb'];
+              if (!otherComp) continue;
+              // Normal vector
+              const nx = dx / dist;
+              const ny = dy / dist;
+              const nz = dz / dist;
+              // Relative velocity
+              const dvx = this.velocity.x - otherComp.velocity.x;
+              const dvy = this.velocity.y - otherComp.velocity.y;
+              const dvz = this.velocity.z - otherComp.velocity.z;
+              // Dot product (velocity along normal)
+              const dot = dvx * nx + dvy * ny + dvz * nz;
+              if (dot < 0) {
+                // Only resolve if moving towards each other
+                // Impulse scalar
+                const impulse = 2 * dot / 2; // mass = 1 for both
+                // Update velocities
+                this.velocity.x -= impulse * nx;
+                this.velocity.y -= impulse * ny;
+                this.velocity.z -= impulse * nz;
+                otherComp.velocity.x += impulse * nx;
+                otherComp.velocity.y += impulse * ny;
+                otherComp.velocity.z += impulse * nz;
+                // Separate the orbs to prevent sticking
+                const overlap = this.radius * 2 - dist + 0.001;
+                pos.x += nx * (overlap / 2);
+                pos.y += ny * (overlap / 2);
+                pos.z += nz * (overlap / 2);
+                otherObj.x -= nx * (overlap / 2);
+                otherObj.y -= ny * (overlap / 2);
+                otherObj.z -= nz * (overlap / 2);
+              }
+            }
+          }
+        }
+      });
+
+      // Spawns many orbs
+      AFRAME.registerComponent('spawn-orbs', {
+        schema: {
+          count: { type: 'int', default: 40 }
+        },
+        init: function () {
+          const sceneEl = this.el;
+          for (let i = 0; i < this.data.count; i++) {
+            let orb = document.createElement('a-sphere');
+            orb.setAttribute('radius', 0.2);
+            orb.setAttribute('color', '#2E8B57');
+            let posX = Math.random() * 8 - 4;
+            let posY = Math.random() * 14 + 1;
+            let posZ = Math.random() * 8 - 4;
+            orb.setAttribute('position', { x: posX, y: posY, z: posZ });
+            orb.setAttribute('bounce-orb', '');
+            sceneEl.appendChild(orb);
+          }
+        }
+      });
+    </script>
+    <style>
+      body { margin: 0; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <a-scene spawn-orbs>
+      <!-- Lighting -->
+      <a-entity light="type: ambient; intensity: 0.9" color="#ffffff"></a-entity>
+      <a-entity light="type: directional; intensity: 0.8" position="0 5 5"></a-entity>
+      
+      <!-- White Floor -->
+      <a-plane position="0 0 0" rotation="-90 0 0" width="10" height="10" color="#FFFFFF"></a-plane>
+      <!-- White Ceiling (much higher) -->
+      <a-plane position="0 16 0" rotation="90 0 0" width="10" height="10" color="#FFFFFF"></a-plane>
+      <!-- White Walls (tall) -->
+      <a-plane position="0 8 -5" rotation="0 0 0" width="10" height="16" color="#FFFFFF"></a-plane>
+      <a-plane position="0 8 5" rotation="0 180 0" width="10" height="16" color="#FFFFFF"></a-plane>
+      <a-plane position="-5 8 0" rotation="0 90 0" width="10" height="16" color="#FFFFFF"></a-plane>
+      <a-plane position="5 8 0" rotation="0 -90 0" width="10" height="16" color="#FFFFFF"></a-plane>
+      <!-- Camera Rig -->
+      <a-entity id="rig" position="0 1.6 0">
+        <a-entity camera wasd-controls look-controls></a-entity>
+      </a-entity>
+      <!-- White Sky -->
+      <a-sky color="#FFFFFF"></a-sky>
+    </a-scene>
+  </body>
+</html>
